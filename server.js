@@ -1,6 +1,5 @@
 // UMPAT Communication - Server
 // Ito ang "utak" ng buong app. Pinapatakbo ito gamit ang: node server.js
-// Gagana ito sa Termux, LAN, at Internet (kasama ang mga instructions sa README.md)
 
 const fs = require('fs');
 const path = require('path');
@@ -12,10 +11,23 @@ const { Server } = require('socket.io');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// --- Static Files ---
+// I-serve ang lahat ng static files mula sa "public" folder (html, css, js)
+app.use(express.static(path.join(__dirname, 'public')));
+
+// --- Fallback Root Route ---
+// Siguraduhin na ilalabas ang index.html kapag in-access ang main URL ("/")
+app.get('/', (req, res) => {
+  const indexPath = path.join(__dirname, 'public', 'index.html');
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.send('UMPAT Communication Server is Running! (Siguraduhing may index.html sa public folder)');
+  }
+});
+
 // --- Piliin kung HTTP o HTTPS gagamitin ---
-// Kung meron cert.pem at key.pem (ginagawa ng generate-cert.sh), gagamit ng HTTPS.
-// Kailangan ang HTTPS para gumana ang camera/mic pag nag-access ka gamit ang
-// IP address ng device (halimbawa http://192.168.1.5:3000) sa halip na "localhost".
+// Pag nasa cloud service tulad ng Render, gagamit ng HTTP dahil Render proxy na ang nag-aayos ng SSL/HTTPS.
 const certPath = path.join(__dirname, 'cert.pem');
 const keyPath = path.join(__dirname, 'key.pem');
 
@@ -39,10 +51,7 @@ const io = new Server(server, {
   cors: { origin: '*' },
 });
 
-app.use(express.static(path.join(__dirname, 'public')));
-
-// --- Listahan ng mga online na user (nasa memory lang, mawawala kapag na-restart ang server) ---
-// Map: socket.id -> username
+// --- Listahan ng mga online na user ---
 const onlineUsers = new Map();
 
 function broadcastUserList() {
@@ -105,10 +114,8 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('==================================================');
   console.log('  UMPAT Communication server - GUMAGANA NA!');
   console.log('==================================================');
-  console.log(`  Protocol : ${proto.toUpperCase()}${usingHttps ? '' : '  (buo lang ang camera/mic sa "localhost")'}`);
-  console.log(`  Lokal    : ${proto}://localhost:${PORT}`);
-  console.log('  Tip: para makita ang IP address mo sa LAN, patakbuhin ang:');
-  console.log('       ip addr show wlan0');
-  console.log('  (basahin ang README.md para sa kumpletong instructions)');
+  console.log(`  Protocol : ${proto.toUpperCase()}`);
+  console.log(`  Port     : ${PORT}`);
   console.log('==================================================');
 });
+  

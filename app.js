@@ -1,394 +1,167 @@
-// ============ UMPAT Communication — Client Logic ============
+const notes = [
+  ['C4', 261.63, 'A'], ['C#4', 277.18, 'W'], ['D4', 293.66, 'S'], ['D#4', 311.13, 'E'],
+  ['E4', 329.63, 'D'], ['F4', 349.23, 'F'], ['F#4', 369.99, 'T'], ['G4', 392, 'G'],
+  ['G#4', 415.3, 'Y'], ['A4', 440, 'H'], ['A#4', 466.16, 'U'], ['B4', 493.88, 'J'], ['C5', 523.25, 'K'],
+];
+const pitchHistory = [];
+const piano = document.querySelector('#piano');
+const micButton = document.querySelector('#mic-button');
+const buttonLabel = document.querySelector('#mic-button-label');
+const currentNote = document.querySelector('#current-note');
+const octave = document.querySelector('#octave');
+const frequencyLabel = document.querySelector('#frequency');
+const cents = document.querySelector('#cents');
+const accuracy = document.querySelector('#accuracy');
+const meterFill = document.querySelector('#meter-fill');
+const statusDot = document.querySelector('#status-dot');
+const statusText = document.querySelector('#status-text');
+let audioContext;
+let analyser;
+let microphone;
+let stream;
+let detectTimer;
+let activeKey;
+let detectedKey;
+let lastVoicedAt = 0;
 
-const socket = io();
-
-let myUsername = '';
-let currentChatUserId = null;
-let currentChatUserName = null;
-let onlineUsersList = [];
-let localStream = null;
-let peerConnection = null;
-let pendingCallFrom = null;
-let pendingCallFromName = null;
-let pendingOffer = null;
-let inCallWith = null;
-
-const chatHistory = {}; // userId -> array of {message, timestamp, mine}
-
-const ICE_SERVERS = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-  ],
-};
-
-// ---------- Helpers ----------
-
-function getInitials(name) {
-  return (name || '?').trim().charAt(0).toUpperCase();
-}
-
-function escapeHtml(str) {
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
-}
-
-function showToast(msg, duration = 3000) {
-  const toast = document.getElementById('toast');
-  toast.textContent = msg;
-  toast.classList.remove('hidden');
-  clearTimeout(showToast._t);
-  showToast._t = setTimeout(() => toast.classList.add('hidden'), duration);
-}
-
-// ---------- Join Screen ----------
-
-const joinScreen = document.getElementById('join-screen');
-const usernameInput = document.getElementById('username-input');
-const joinBtn = document.getElementById('join-btn');
-const joinError = document.getElementById('join-error');
-const appEl = document.getElementById('app');
-const myAvatar = document.getElementById('my-avatar');
-const myNameLabel = document.getElementById('my-name-label');
-
-joinBtn.addEventListener('click', joinChat);
-usernameInput.addEventListener('keypress', (e) => {
-  if (e.key === 'Enter') joinChat();
-});
-
-function joinChat() {
-  const name = usernameInput.value.trim();
-  if (!name) {
-    joinError.classList.remove('hidden');
-    return;
-  }
-  myUsername = name;
-  socket.emit('join', name);
-  joinScreen.classList.add('hidden');
-  appEl.classList.remove('hidden');
-  myAvatar.textContent = getInitials(name);
-  myNameLabel.textContent = name;
-}
-
-// ---------- Contacts List ----------
-
-const contactsList = document.getElementById('contacts-list');
-
-socket.on('user-list', (users) => {
-  onlineUsersList = users.filter((u) => u.id !== socket.id);
-  renderContacts();
-});
-
-function renderContacts() {
-  if (onlineUsersList.length === 0) {
-    contactsList.innerHTML = '<div class="no-contacts">Walang ibang online na user sa ngayon. Buksan ang app na ito sa ibang device na nasa parehong network.</div>';
-    return;
-  }
-  contactsList.innerHTML = '';
-  onlineUsersList.forEach((user) => {
-    const div = document.createElement('div');
-    div.className = 'contact-item' + (user.id === currentChatUserId ? ' active' : '');
-    div.innerHTML = `
-      <div class="avatar">${getInitials(user.name)}<span class="online-dot"></span></div>
-      <div class="contact-info">
-        <div class="contact-name">${escapeHtml(user.name)}</div>
-        <div class="contact-preview">Online</div>
-      </div>
-    `;
-    div.addEventListener('click', () => openChat(user.id, user.name));
-    contactsList.appendChild(div);
+function renderPiano() {
+  const whiteNotes = notes.filter(([name]) => !name.includes('#'));
+  whiteNotes.forEach(([name, hz, key]) => {
+    const element = document.createElement('button');
+    element.className = 'key'; element.dataset.note = name;
+    element.setAttribute('aria-label', `Patugtugin ang ${name}`);
+    element.innerHTML = `<span class="key-label">${name}<br><small>${key}</small></span>`;
+    element.addEventListener('pointerdown', () => playNote(hz, element));
+    piano.appendChild(element);
+  });
+  notes.filter(([name]) => name.includes('#')).forEach(([name, hz, key]) => {
+    const whiteBefore = notes.slice(0, notes.findIndex((note) => note[0] === name)).filter((note) => !note[0].includes('#')).length;
+    const element = document.createElement('button');
+    element.className = 'black-key'; element.dataset.note = name;
+    element.style.left = `calc(${(whiteBefore / whiteNotes.length) * 100}% - 3.75%)`;
+    element.setAttribute('aria-label', `Patugtugin ang ${name}`);
+    element.innerHTML = `<span class="key-label">${key}</span>`;
+    element.addEventListener('pointerdown', () => playNote(hz, element));
+    piano.appendChild(element);
   });
 }
 
-// ---------- Chat Window ----------
-
-const noChatSelected = document.getElementById('no-chat-selected');
-const chatWindow = document.getElementById('chat-window');
-const chatContactName = document.getElementById('chat-contact-name');
-const chatAvatar = document.getElementById('chat-avatar');
-const messagesContainer = document.getElementById('messages-container');
-const messageInput = document.getElementById('message-input');
-const sendBtn = document.getElementById('send-btn');
-const backBtn = document.getElementById('back-btn');
-
-function openChat(userId, userName) {
-  currentChatUserId = userId;
-  currentChatUserName = userName;
-  noChatSelected.classList.add('hidden');
-  chatWindow.classList.remove('hidden');
-  chatContactName.textContent = userName;
-  chatAvatar.textContent = getInitials(userName);
-  appEl.classList.add('chat-open');
-  renderContacts();
-  renderMessages();
+function ensureAudio() {
+  if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioContext.state === 'suspended') return audioContext.resume();
+  return Promise.resolve();
 }
 
-backBtn.addEventListener('click', () => {
-  appEl.classList.remove('chat-open');
-});
-
-sendBtn.addEventListener('click', sendMessage);
-messageInput.addEventListener('keypress', (e) => {
-  if (e.key === 'Enter') sendMessage();
-});
-
-function sendMessage() {
-  const text = messageInput.value.trim();
-  if (!text || !currentChatUserId) return;
-  socket.emit('chat-message', { to: currentChatUserId, message: text });
-  addMessageToHistory(currentChatUserId, { message: text, timestamp: Date.now(), mine: true });
-  messageInput.value = '';
-  renderMessages();
+function playNote(hz, element) {
+  ensureAudio();
+  const oscillator = audioContext.createOscillator();
+  const gain = audioContext.createGain();
+  oscillator.type = 'triangle'; oscillator.frequency.value = hz;
+  gain.gain.setValueAtTime(0.0001, audioContext.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.22, audioContext.currentTime + 0.015);
+  gain.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.65);
+  oscillator.connect(gain).connect(audioContext.destination);
+  oscillator.start(); oscillator.stop(audioContext.currentTime + 0.7);
+  if (activeKey) activeKey.classList.remove('played');
+  activeKey = element; element.classList.add('played');
+  setTimeout(() => element.classList.remove('played'), 700);
 }
 
-socket.on('chat-message', (data) => {
-  addMessageToHistory(data.from, {
-    message: data.message,
-    timestamp: data.timestamp,
-    mine: false,
-  });
-  if (data.from === currentChatUserId) {
-    renderMessages();
-  } else {
-    showToast(`Bagong mensahe mula kay ${data.fromName}`);
+function median(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+function readMic() {
+  const samples = new Float32Array(analyser.fftSize);
+  analyser.getFloatTimeDomainData(samples);
+  const result = HuniPitchDetector.detectPitch(samples, audioContext.sampleRate);
+  if (result.frequency && result.confidence > 0.72) {
+    pitchHistory.push(result.frequency);
+    if (pitchHistory.length > 5) pitchHistory.shift();
+    lastVoicedAt = Date.now();
+    showPitch(median(pitchHistory), result.confidence);
+  } else if (Date.now() - lastVoicedAt > 450) {
+    pitchHistory.length = 0;
+    resetReadout(true);
   }
-});
-
-function addMessageToHistory(userId, msg) {
-  if (!chatHistory[userId]) chatHistory[userId] = [];
-  chatHistory[userId].push(msg);
 }
 
-function renderMessages() {
-  const msgs = chatHistory[currentChatUserId] || [];
-  if (msgs.length === 0) {
-    messagesContainer.innerHTML = '<div class="no-contacts">Wala pang mensahe. Magsimula ng usapan!</div>';
+async function startListening() {
+  if (!window.isSecureContext && location.hostname !== 'localhost') {
+    toast('Kailangan ng HTTPS para makagamit ng mikropono sa device na ito.');
     return;
   }
-  messagesContainer.innerHTML = msgs
-    .map(
-      (m) => `
-    <div class="message-row ${m.mine ? 'mine' : 'theirs'}">
-      <div class="message-bubble">${escapeHtml(m.message)}</div>
-    </div>
-  `
-    )
-    .join('');
-  messagesContainer.scrollTop = messagesContainer.scrollHeight;
-}
-
-// ---------- Video Call (WebRTC) ----------
-
-const videoCallBtn = document.getElementById('video-call-btn');
-const voiceCallBtn = document.getElementById('voice-call-btn');
-const videoCallOverlay = document.getElementById('video-call-overlay');
-const localVideo = document.getElementById('local-video');
-const remoteVideo = document.getElementById('remote-video');
-const callStatus = document.getElementById('call-status');
-const endCallBtn = document.getElementById('end-call-btn');
-const toggleMicBtn = document.getElementById('toggle-mic-btn');
-const toggleCamBtn = document.getElementById('toggle-cam-btn');
-
-const incomingCallModal = document.getElementById('incoming-call-modal');
-const callerName = document.getElementById('caller-name');
-const callerAvatar = document.getElementById('caller-avatar');
-const incomingCallLabel = document.getElementById('incoming-call-label');
-const acceptCallBtn = document.getElementById('accept-call-btn');
-const declineCallBtn = document.getElementById('decline-call-btn');
-
-videoCallBtn.addEventListener('click', () => startCall(true));
-voiceCallBtn.addEventListener('click', () => startCall(false));
-
-async function startCall(withVideo) {
-  if (!currentChatUserId) return;
-  if (!window.isSecureContext) {
-    showToast('Kailangan ng HTTPS o localhost para gumana ang camera/mic. Basahin ang README.md.', 6000);
+  if (!navigator.mediaDevices?.getUserMedia) {
+    toast('Hindi suportado ng browser ang microphone access. Subukan ang Chrome o Safari.');
     return;
   }
   try {
-    localStream = await navigator.mediaDevices.getUserMedia({ video: withVideo, audio: true });
-  } catch (err) {
-    showToast('Hindi ma-access ang camera/mic: ' + err.message, 5000);
-    return;
+    await ensureAudio();
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
+    });
+    analyser = audioContext.createAnalyser();
+    analyser.fftSize = 4096;
+    analyser.smoothingTimeConstant = 0;
+    microphone = audioContext.createMediaStreamSource(stream);
+    microphone.connect(analyser);
+    micButton.classList.add('active'); buttonLabel.textContent = 'Itigil ang pakikinig';
+    statusDot.classList.add('active'); statusText.textContent = 'Nakikinig — kumanta ng isang nota';
+    lastVoicedAt = Date.now();
+    detectTimer = window.setInterval(readMic, 70);
+  } catch (error) {
+    const message = error.name === 'NotAllowedError'
+      ? 'Hindi pinayagan ang mikropono. Pindutin ang lock icon sa browser at i-Allow ang Microphone.'
+      : 'Hindi mabuksan ang mikropono. Siguraduhing walang ibang app na gumagamit nito.';
+    toast(message);
   }
-  localVideo.srcObject = localStream;
-  localVideo.classList.toggle('hidden', !withVideo);
-  inCallWith = currentChatUserId;
-  showCallOverlay('Tumatawag...');
-
-  peerConnection = createPeerConnection(currentChatUserId);
-  localStream.getTracks().forEach((track) => peerConnection.addTrack(track, localStream));
-
-  const offer = await peerConnection.createOffer();
-  await peerConnection.setLocalDescription(offer);
-
-  socket.emit('call-user', { to: currentChatUserId, offer });
 }
 
-function createPeerConnection(targetId) {
-  const pc = new RTCPeerConnection(ICE_SERVERS);
-
-  pc.onicecandidate = (event) => {
-    if (event.candidate) {
-      socket.emit('ice-candidate', { to: targetId, candidate: event.candidate });
-    }
-  };
-
-  pc.ontrack = (event) => {
-    remoteVideo.srcObject = event.streams[0];
-    callStatus.textContent = 'Nakakonekta';
-  };
-
-  pc.onconnectionstatechange = () => {
-    if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) {
-      endCall(false);
-    }
-  };
-
-  return pc;
+function stopListening() {
+  window.clearInterval(detectTimer);
+  if (stream) stream.getTracks().forEach((track) => track.stop());
+  if (microphone) microphone.disconnect();
+  analyser = null; microphone = null; stream = null; pitchHistory.length = 0;
+  if (detectedKey) detectedKey.classList.remove('detected');
+  detectedKey = null; micButton.classList.remove('active'); buttonLabel.textContent = 'I-on ang mikropono';
+  statusDot.classList.remove('active'); statusText.textContent = 'Handa nang makinig';
+  resetReadout(false);
 }
 
-socket.on('incoming-call', async ({ from, fromName, offer }) => {
-  if (peerConnection) {
-    // Busy na sa ibang tawag — awtomatikong tanggihan
-    io_emitEndCall(from);
-    return;
-  }
-  pendingCallFrom = from;
-  pendingCallFromName = fromName;
-  pendingOffer = offer;
-  callerName.textContent = fromName;
-  callerAvatar.textContent = getInitials(fromName);
-  incomingCallLabel.textContent = 'Video calling...';
-  incomingCallModal.classList.remove('hidden');
-});
-
-function io_emitEndCall(to) {
-  socket.emit('end-call', { to });
+function showPitch(hz, confidence) {
+  const midi = Math.round(69 + 12 * Math.log2(hz / 440));
+  const targetHz = 440 * Math.pow(2, (midi - 69) / 12);
+  const difference = Math.round(1200 * Math.log2(hz / targetHz));
+  const names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const noteName = names[(midi + 120) % 12];
+  const noteOctave = Math.floor(midi / 12) - 1;
+  const tuneAccuracy = Math.max(0, Math.round((1 - Math.min(Math.abs(difference), 50) / 50) * 100));
+  currentNote.textContent = noteName; octave.textContent = noteOctave; frequencyLabel.textContent = `${hz.toFixed(1)} Hz`;
+  cents.textContent = difference === 0 ? 'Saktong tono' : `${difference > 0 ? '+' : ''}${difference} cents`;
+  accuracy.textContent = `${tuneAccuracy}%`; meterFill.style.width = `${Math.max(tuneAccuracy, confidence * 40)}%`;
+  if (detectedKey) detectedKey.classList.remove('detected');
+  detectedKey = document.querySelector(`[data-note="${noteName}${noteOctave}"]`);
+  if (detectedKey) detectedKey.classList.add('detected');
 }
 
-acceptCallBtn.addEventListener('click', async () => {
-  incomingCallModal.classList.add('hidden');
-  if (!window.isSecureContext) {
-    showToast('Kailangan ng HTTPS o localhost para gumana ang camera/mic. Basahin ang README.md.', 6000);
-    io_emitEndCall(pendingCallFrom);
-    pendingCallFrom = null;
-    pendingOffer = null;
-    return;
-  }
-  try {
-    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-  } catch (err) {
-    showToast('Hindi ma-access ang camera/mic: ' + err.message, 5000);
-    io_emitEndCall(pendingCallFrom);
-    pendingCallFrom = null;
-    pendingOffer = null;
-    return;
-  }
-  localVideo.srcObject = localStream;
-  localVideo.classList.remove('hidden');
-  inCallWith = pendingCallFrom;
-  showCallOverlay('Kumokonekta...');
-
-  peerConnection = createPeerConnection(pendingCallFrom);
-  localStream.getTracks().forEach((track) => peerConnection.addTrack(track, localStream));
-
-  await peerConnection.setRemoteDescription(new RTCSessionDescription(pendingOffer));
-  const answer = await peerConnection.createAnswer();
-  await peerConnection.setLocalDescription(answer);
-
-  socket.emit('answer-call', { to: pendingCallFrom, answer });
-
-  if (!currentChatUserId) {
-    openChat(pendingCallFrom, pendingCallFromName);
-  }
-
-  pendingCallFrom = null;
-  pendingOffer = null;
-});
-
-declineCallBtn.addEventListener('click', () => {
-  incomingCallModal.classList.add('hidden');
-  if (pendingCallFrom) io_emitEndCall(pendingCallFrom);
-  pendingCallFrom = null;
-  pendingOffer = null;
-});
-
-socket.on('call-answered', async ({ answer }) => {
-  if (!peerConnection) return;
-  await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-  callStatus.textContent = 'Nakakonekta';
-});
-
-socket.on('ice-candidate', async ({ candidate }) => {
-  if (peerConnection && candidate) {
-    try {
-      await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-    } catch (err) {
-      console.error('Error sa pag-add ng ICE candidate:', err);
-    }
-  }
-});
-
-socket.on('call-ended', () => {
-  showToast('Natapos ang tawag.');
-  endCall(false);
-});
-
-function showCallOverlay(status) {
-  videoCallOverlay.classList.remove('hidden');
-  callStatus.textContent = status;
+function resetReadout(listening) {
+  currentNote.textContent = '—'; octave.textContent = ''; frequencyLabel.textContent = '0.0 Hz';
+  cents.textContent = listening ? 'Kumanta ng isang malinaw na nota' : 'Umawit para magsimula';
+  accuracy.textContent = '—'; meterFill.style.width = '0';
+  if (detectedKey) detectedKey.classList.remove('detected');
+  detectedKey = null;
 }
 
-endCallBtn.addEventListener('click', () => endCall(true));
-
-function endCall(notifyPeer) {
-  if (notifyPeer && inCallWith) {
-    io_emitEndCall(inCallWith);
-  }
-  if (peerConnection) {
-    peerConnection.close();
-    peerConnection = null;
-  }
-  if (localStream) {
-    localStream.getTracks().forEach((t) => t.stop());
-    localStream = null;
-  }
-  remoteVideo.srcObject = null;
-  localVideo.srcObject = null;
-  videoCallOverlay.classList.add('hidden');
-  pendingCallFrom = null;
-  pendingOffer = null;
-  inCallWith = null;
+function toast(message) {
+  const element = document.querySelector('#toast'); element.textContent = message; element.classList.add('show');
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => element.classList.remove('show'), 5500);
 }
 
-toggleMicBtn.addEventListener('click', () => {
-  if (!localStream) return;
-  const audioTrack = localStream.getAudioTracks()[0];
-  if (!audioTrack) return;
-  audioTrack.enabled = !audioTrack.enabled;
-  toggleMicBtn.classList.toggle('off', !audioTrack.enabled);
-});
-
-toggleCamBtn.addEventListener('click', () => {
-  if (!localStream) return;
-  const videoTrack = localStream.getVideoTracks()[0];
-  if (!videoTrack) return;
-  videoTrack.enabled = !videoTrack.enabled;
-  toggleCamBtn.classList.toggle('off', !videoTrack.enabled);
-});
-
-// ---------- Search filter (simpleng client-side filter) ----------
-
-const searchInput = document.getElementById('search-input');
-searchInput.addEventListener('input', () => {
-  const q = searchInput.value.trim().toLowerCase();
-  const filtered = q
-    ? onlineUsersList.filter((u) => u.name.toLowerCase().includes(q))
-    : onlineUsersList;
-  const original = onlineUsersList;
-  onlineUsersList = filtered;
-  renderContacts();
-  onlineUsersList = original;
+renderPiano();
+micButton.addEventListener('click', () => (stream ? stopListening() : startListening()));
+document.addEventListener('keydown', (event) => {
+  if (event.repeat || ['INPUT', 'TEXTAREA', 'BUTTON'].includes(event.target.tagName)) return;
+  const match = notes.find((note) => note[2].toLowerCase() === event.key.toLowerCase());
+  if (match) playNote(match[1], document.querySelector(`[data-note="${match[0]}"]`));
 });

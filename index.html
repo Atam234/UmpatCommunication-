@@ -1,110 +1,47 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="tl">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>UMPAT Communication</title>
-<link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Huni Piano — Vocal Note Detector</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <main class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="Huni Piano home"><span class="brand-mark">♫</span><span>huni<span class="brand-light">piano</span></span></a>
+      <p class="tagline">Makinig. Hanapin. Tumugtog.</p>
+      <button id="mic-button" class="mic-button" type="button"><span class="mic-icon">●</span><span id="mic-button-label">I-on ang mikropono</span></button>
+    </header>
 
-  <!-- ===== JOIN SCREEN ===== -->
-  <div id="join-screen" class="join-screen">
-    <div class="join-card">
-      <div class="join-logo">U</div>
-      <h1>UMPAT Communication</h1>
-      <p class="join-sub">I-type ang pangalan mo para sumali sa chat</p>
-      <input type="text" id="username-input" placeholder="Pangalan mo..." maxlength="24" autocomplete="off">
-      <button id="join-btn">Sumali</button>
-      <p id="join-error" class="join-error hidden">Maglagay muna ng pangalan.</p>
-    </div>
-  </div>
+    <section class="hero" aria-labelledby="page-title">
+      <p class="eyebrow">VOCAL NOTE DETECTOR</p>
+      <h1 id="page-title">Hanapin ang nota<br>sa <em>boses mo.</em></h1>
+      <p class="intro">Kumanta o humuni sa mikropono. Awtomatikong iilaw ang katumbas na key sa piano.</p>
+    </section>
 
-  <!-- ===== MAIN APP ===== -->
-  <div id="app" class="app hidden">
-
-    <!-- Sidebar -->
-    <div class="sidebar">
-      <div class="sidebar-header">
-        <div class="app-logo">U</div>
-        <span class="app-title">UMPAT</span>
+    <section class="detector-card" aria-label="Kasalukuyang natukoy na nota">
+      <div class="listening-row"><span id="status-dot" class="status-dot"></span><span id="status-text">Handa nang makinig</span><span class="live-pill">LIVE</span></div>
+      <div class="note-readout">
+        <div><span id="current-note" class="current-note">—</span><span id="octave" class="octave"></span></div>
+        <div class="readout-detail"><span id="frequency">0.0 Hz</span><span class="separator">·</span><span id="cents">Umawit para magsimula</span></div>
       </div>
-      <div class="sidebar-search">
-        <input type="text" id="search-input" placeholder="🔍 Maghanap sa mga kontak">
-      </div>
-      <div class="contacts-list" id="contacts-list">
-        <div class="no-contacts">Naghihintay ng ibang user...</div>
-      </div>
-      <div class="sidebar-footer">
-        <div class="avatar avatar-sm" id="my-avatar"></div>
-        <span id="my-name-label"></span>
-      </div>
-    </div>
+      <div class="meter-wrap"><div class="meter-label"><span>Katumpakan ng tono</span><strong id="accuracy">—</strong></div><div class="meter"><div id="meter-fill" class="meter-fill"></div></div></div>
+    </section>
 
-    <!-- Chat Area -->
-    <div class="chat-area">
-      <div class="no-chat-selected" id="no-chat-selected">
-        <div class="no-chat-icon">💬</div>
-        <p>Pumili ng kontak sa kaliwa para magsimulang mag-chat o tumawag.</p>
-      </div>
+    <section class="piano-section" aria-label="Interactive piano">
+      <div class="piano-heading"><div><p class="eyebrow">PIANO</p><h2>Pumili ng nota o gamitin ang keyboard.</h2></div><p class="keyboard-tip"><kbd>A</kbd> hanggang <kbd>K</kbd> para tumugtog</p></div>
+      <div id="piano" class="piano" role="group" aria-label="Mga key ng piano"></div>
+      <div class="legend"><span><i class="legend-dot detected"></i>Nota sa boses mo</span><span><i class="legend-dot played"></i>Pinatugtog na key</span></div>
+    </section>
 
-      <div class="chat-window hidden" id="chat-window">
-        <div class="chat-header">
-          <div class="chat-contact-info">
-            <button class="icon-btn back-btn" id="back-btn" title="Bumalik">←</button>
-            <div class="avatar" id="chat-avatar"></div>
-            <div>
-              <div class="chat-contact-name" id="chat-contact-name"></div>
-              <div class="chat-contact-status" id="chat-contact-status">Online</div>
-            </div>
-          </div>
-          <div class="chat-header-actions">
-            <button class="icon-btn" id="voice-call-btn" title="Voice Call">📞</button>
-            <button class="icon-btn" id="video-call-btn" title="Video Call">📹</button>
-          </div>
-        </div>
-
-        <div class="messages-container" id="messages-container"></div>
-
-        <div class="chat-input-area">
-          <input type="text" id="message-input" placeholder="Aa" autocomplete="off">
-          <button id="send-btn" title="Ipadala">➤</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ===== INCOMING CALL MODAL ===== -->
-  <div id="incoming-call-modal" class="incoming-call-modal hidden">
-    <div class="incoming-call-card">
-      <div class="avatar avatar-lg" id="caller-avatar"></div>
-      <h2 id="caller-name"></h2>
-      <p class="incoming-call-label" id="incoming-call-label">Video calling...</p>
-      <div class="incoming-call-actions">
-        <button id="decline-call-btn" class="call-btn decline" title="Tanggihan">✕</button>
-        <button id="accept-call-btn" class="call-btn accept" title="Sagutin">📹</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ===== VIDEO CALL OVERLAY ===== -->
-  <div id="video-call-overlay" class="video-call-overlay hidden">
-    <video id="remote-video" autoplay playsinline></video>
-    <video id="local-video" autoplay playsinline muted></video>
-    <div class="call-top-bar">
-      <span class="call-status" id="call-status">Tumatawag...</span>
-    </div>
-    <div class="call-controls">
-      <button class="control-btn" id="toggle-mic-btn" title="I-mute/Unmute">🎤</button>
-      <button class="control-btn end-call" id="end-call-btn" title="Tapusin ang tawag">📵</button>
-      <button class="control-btn" id="toggle-cam-btn" title="Buksan/Isara ang camera">📷</button>
-    </div>
-  </div>
-
-  <!-- Simple toast para sa mga notification (hal. missed call, error) -->
-  <div id="toast" class="toast hidden"></div>
-
-  <script src="/socket.io/socket.io.js"></script>
+    <section class="tips"><div class="tip-number">01</div><div><h3>Para sa pinakamahusay na resulta</h3><p>Humanap ng tahimik na lugar, ilapit ang mikropono, at panatilihing isang nota ang iyong kinakanta.</p></div><div class="tip-note">Tip: Maaari mong pindutin ang piano keys para ikumpara ang tunog.</div></section>
+  </main>
+  <div id="toast" class="toast" role="status"></div>
+  <script src="pitch-detector.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
